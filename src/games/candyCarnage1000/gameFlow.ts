@@ -41,7 +41,6 @@ interface ClusterWin {
   payout: number;
   matched: number;
   positions: BoardCell[];
-  bombPositions: BoardCell[];
 }
 
 interface ScatterInfo {
@@ -49,6 +48,11 @@ interface ScatterInfo {
   superScatterCount: number;
   scatterPositions: BoardCell[];
   superScatterPositions: BoardCell[];
+}
+
+interface ClusterEvaluationResult {
+  clusters: ClusterWin[];
+  bombCells: BoardCell[];
 }
 
 interface SpinOutcome {
@@ -142,7 +146,7 @@ function playFreeSpins(ctx: CandyContext) {
     if (outcome.retriggerSpins) {
       ctx.services.game.awardFreespins(outcome.retriggerSpins);
       ctx.state.userData.totalBonusSpinsAwarded += outcome.retriggerSpins;
-      recordRetrigger(ctx, outcome.retriggerSpins);
+      recordRetrigger(ctx);
     }
 
     if (ctx.services.wallet.getCurrentWin() >= MAX_WIN_MULTIPLIER) {
@@ -188,15 +192,15 @@ function playSpin(
     forceScatterLayout(ctx, opts.clampScatter);
   }
 
+  const activeBonusType = opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular';
   if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
-    assignBombMultipliers(ctx, opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular');
+    assignBombMultipliers(ctx, activeBonusType);
   }
 
   recordReveal(ctx, opts.spinType);
 
   const scatterInfo = getScatterInfo(ctx);
   let totalTumbleWin = 0;
-  let tumbleIndex = 0;
 
   // Scatter payout before tumbles if configured
   if (opts.allowScatterPayout) {
@@ -209,52 +213,48 @@ function playSpin(
   }
 
   while (true) {
-    const clusters = evaluateClusters(ctx, opts.spinType);
+    const { clusters, bombCells } = evaluateClusters(ctx, opts.spinType);
     if (clusters.length === 0) {
       break;
     }
 
-    tumbleIndex += 1;
     const tumbleWin = clusters.reduce((sum, cluster) => sum + cluster.payout, 0);
 
     recordClusterWin(ctx, clusters);
-
-    let bombSum = 0;
-    if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
-      bombSum = clusters
-        .flatMap((cluster) => cluster.bombPositions)
-        .reduce((sum, cell) => {
-          const multiplier = cell.symbol.properties.get('multiplier') ?? 0;
-          return sum + multiplier;
-        }, 0);
-    }
 
     ctx.services.wallet.addTumbleWin(tumbleWin);
     totalTumbleWin += tumbleWin;
     recordTumbleWin(ctx, totalTumbleWin);
 
-    const clearedPositions = clusters.flatMap((cluster) => cluster.positions);
-    const tumbleResult = ctx.services.board.tumbleBoard(
-      clearedPositions.map((pos) => ({ reelIdx: pos.reel, rowIdx: pos.row })),
-    );
-    if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
-      applyMultipliersToNewSymbols(tumbleResult.newBoardSymbols, ctx, opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular');
-      assignBombMultipliers(ctx, opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular');
-    }
-    recordTumbleBoard(ctx, clearedPositions, tumbleResult);
-
-    if (opts.spinType === SPIN_TYPE.FREE_SPINS && bombSum > 0) {
-      const multiplier = Math.max(bombSum, 1);
-      const bonusWin = tumbleWin * (multiplier - 1);
-      if (bonusWin > 0) {
+    if (opts.spinType === SPIN_TYPE.FREE_SPINS && bombCells.length > 0) {
+      const boardMultiplier = bombCells.reduce(
+        (sum, cell) => sum + (cell.symbol.properties.get('multiplier') ?? 0),
+        0,
+      );
+      if (boardMultiplier > 0) {
+        const multiplier = Math.max(boardMultiplier, 1);
+        const bonusWin = tumbleWin * (multiplier - 1);
         ctx.state.userData.bonusMultiplierStack.push(multiplier);
-        recordBombMultiplier(ctx, clusters, tumbleWin, multiplier, tumbleWin * multiplier);
-        ctx.services.wallet.addTumbleWin(bonusWin);
-        totalTumbleWin += bonusWin;
-        recordTumbleWin(ctx, totalTumbleWin);
+        recordBombMultiplier(ctx, bombCells, tumbleWin, multiplier, tumbleWin * multiplier);
+        if (bonusWin > 0) {
+          ctx.services.wallet.addTumbleWin(bonusWin);
+          totalTumbleWin += bonusWin;
+          recordTumbleWin(ctx, totalTumbleWin);
+        }
       }
     }
 
+    const clearedPositions = clusters.flatMap((cluster) => cluster.positions);
+    const positionsToClear =
+      opts.spinType === SPIN_TYPE.FREE_SPINS ? clearedPositions.concat(bombCells) : clearedPositions;
+    const tumbleResult = ctx.services.board.tumbleBoard(
+      positionsToClear.map((pos) => ({ reelIdx: pos.reel, rowIdx: pos.row })),
+    );
+    if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
+      applyMultipliersToNewSymbols(tumbleResult.newBoardSymbols, ctx, activeBonusType);
+      assignBombMultipliers(ctx, activeBonusType);
+    }
+    recordTumbleBoard(ctx, positionsToClear, tumbleResult);
   }
 
   ctx.services.wallet.confirmSpinWin();
@@ -283,108 +283,50 @@ function playSpin(
   return result;
 }
 
-function evaluateClusters(ctx: CandyContext, spinType: SpinType): ClusterWin[] {
+function evaluateClusters(ctx: CandyContext, spinType: SpinType): ClusterEvaluationResult {
   const board = ctx.services.board.getBoardReels();
-  const visited = Array.from({ length: REELS }, () => Array(VISIBLE_ROWS).fill(false));
-  const clusters: ClusterWin[] = [];
+  const buckets = new Map<string, BoardCell[]>();
+  const bombCells: BoardCell[] = [];
 
   for (let reel = 0; reel < REELS; reel++) {
     for (let row = 0; row < VISIBLE_ROWS; row++) {
-      if (visited[reel]?.[row]) continue;
       const symbol = board[reel]?.[row];
       if (!symbol) continue;
+
+      if (symbol.id === 'M' && spinType === SPIN_TYPE.FREE_SPINS) {
+        bombCells.push({ reel, row, symbol });
+      }
+
       if (!PAY_SYMBOL_SET.has(symbol.id)) continue;
 
-      const cluster = floodFillCluster(ctx, board, { reel, row, symbol }, visited, spinType);
-      if (cluster && cluster.matched >= CLUSTER_MIN_SIZE && cluster.payout > 0) {
-        clusters.push(cluster);
+      if (!buckets.has(symbol.id)) {
+        buckets.set(symbol.id, []);
       }
+      buckets.get(symbol.id)!.push({ reel, row, symbol });
     }
   }
 
-  return clusters;
-}
-
-function floodFillCluster(
-  ctx: CandyContext,
-  board: GameSymbol[][],
-  start: BoardCell,
-  visited: boolean[][],
-  spinType: SpinType,
-): ClusterWin | null {
-  const queue: BoardCell[] = [start];
-  const positions: BoardCell[] = [];
-  const bombPositions: BoardCell[] = [];
-  const baseSymbolId = start.symbol.id;
-
-  let matchedCount = 0;
-
-  while (queue.length) {
-    const cell = queue.shift()!;
-    const { reel, row, symbol } = cell;
-    if (visited[reel]?.[row]) continue;
-    visited[reel]![row] = true;
-    positions.push(cell);
-
-    if (symbol.id === baseSymbolId) {
-      matchedCount += 1;
-    } else if (symbol.id === 'M' && spinType === SPIN_TYPE.FREE_SPINS) {
-      bombPositions.push(cell);
+  const clusters: ClusterWin[] = [];
+  buckets.forEach((cells, symbolId) => {
+    const matched = cells.length;
+    if (matched < CLUSTER_MIN_SIZE) {
+      return;
     }
-
-    for (const neighbor of getNeighbors(board, reel, row)) {
-      if (visited[neighbor.reel]?.[neighbor.row]) continue;
-      if (shouldJoinCluster(neighbor.symbol, baseSymbolId, spinType)) {
-        queue.push(neighbor);
-      }
+    const baseSymbol = ctx.config.symbols.get(symbolId as any);
+    const pays = baseSymbol?.pays ?? {};
+    const payout = pays[matched] ?? 0;
+    if (payout <= 0) {
+      return;
     }
-  }
+    clusters.push({
+      symbolId,
+      payout,
+      matched,
+      positions: cells,
+    });
+  });
 
-  if (matchedCount < CLUSTER_MIN_SIZE) {
-    return null;
-  }
-
-  const baseSymbol = ctx.config.symbols.get(baseSymbolId as any);
-  const pays = baseSymbol?.pays ?? {};
-  const payout = pays[matchedCount] ?? 0;
-
-  return {
-    symbolId: baseSymbolId,
-    payout,
-    matched: matchedCount,
-    positions,
-    bombPositions,
-  };
-}
-
-function shouldJoinCluster(symbol: GameSymbol, baseSymbolId: string, spinType: SpinType): boolean {
-  if (!symbol) return false;
-  if (symbol.id === baseSymbolId) return true;
-  if (symbol.id === 'M' && spinType === SPIN_TYPE.FREE_SPINS) return true;
-  return false;
-}
-
-function getNeighbors(board: GameSymbol[][], reel: number, row: number): BoardCell[] {
-  const neighbors: BoardCell[] = [];
-  const deltas: Array<[number, number]> = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ];
-
-  for (const [dx, dy] of deltas) {
-    const nr = reel + dx;
-    const nc = row + dy;
-    if (nr >= 0 && nr < REELS && nc >= 0 && nc < VISIBLE_ROWS) {
-      const symbol = board[nr]?.[nc];
-      if (symbol) {
-        neighbors.push({ reel: nr, row: nc, symbol });
-      }
-    }
-  }
-
-  return neighbors;
+  return { clusters, bombCells };
 }
 
 function assignBombMultipliers(ctx: CandyContext, bonusType: BonusType) {
@@ -510,7 +452,7 @@ function recordTumbleWin(ctx: CandyContext, total: number) {
 
 function recordBombMultiplier(
   ctx: CandyContext,
-  clusters: ClusterWin[],
+  bombCells: BoardCell[],
   tumbleWin: number,
   boardMultiplier: number,
   totalWin: number,
@@ -518,14 +460,12 @@ function recordBombMultiplier(
   pushEvent(ctx, {
     type: 'boardMultiplierInfo',
     multInfo: {
-      positions: clusters
-        .flatMap((cluster) => cluster.bombPositions)
-        .map((cell) => ({
-          reel: cell.reel,
-          row: cell.row,
-          name: cell.symbol.id,
-          multiplier: cell.symbol.properties.get('multiplier') ?? 0,
-        })),
+      positions: bombCells.map((cell) => ({
+        reel: cell.reel,
+        row: cell.row + 1,
+        name: cell.symbol.id,
+        multiplier: cell.symbol.properties.get('multiplier') ?? 0,
+      })),
     },
     winInfo: {
       tumbleWin,
@@ -599,11 +539,11 @@ function recordUpdateFreeSpin(ctx: CandyContext, spinIndex: number) {
   pushEvent(ctx, {
     type: 'updateFreeSpin',
     amount: spinIndex,
-    total: ctx.state.userData.totalBonusSpinsAwarded,
+    total: ctx.state.currentFreespinAmount,
   });
 }
 
-function recordRetrigger(ctx: CandyContext, added: number) {
+function recordRetrigger(ctx: CandyContext) {
   pushEvent(ctx, {
     type: 'freeSpinRetrigger',
     totalFs: ctx.state.currentFreespinAmount,
@@ -636,7 +576,6 @@ function finalizeSimulation(ctx: CandyContext) {
   pushEvent(ctx, {
     type: 'finalWin',
     amount: totalWin,
-    winLevel: getWinLevel(totalWin),
   });
 }
 
@@ -686,7 +625,8 @@ function toRawSymbol(symbol?: GameSymbol | null): RawSymbolPayload {
   const raw: RawSymbolPayload = { name: symbol.id };
   if (symbol.id === 'M') {
     raw.bomb = true;
-    raw.multiplier = symbol.properties.get('multiplier') ?? 0;
+    const multiplier = symbol.properties.get('multiplier') ?? 0;
+    raw.multiplier = multiplier > 0 ? multiplier : 2;
   }
   if (symbol.id === 'S' || symbol.id === 'BS') {
     raw.scatter = true;
@@ -695,7 +635,8 @@ function toRawSymbol(symbol?: GameSymbol | null): RawSymbolPayload {
 }
 
 function buildClusterMeta(cluster: ClusterWin) {
-  const overlay = serializeOverlay(cluster.positions[0]);
+  const overlayAnchor = getClusterOverlayAnchor(cluster.positions);
+  const overlay = serializeOverlay(overlayAnchor);
   return {
     clusterMult: 1,
     winWithoutMult: cluster.payout,
@@ -703,8 +644,26 @@ function buildClusterMeta(cluster: ClusterWin) {
   };
 }
 
+function getClusterOverlayAnchor(positions: BoardCell[]): BoardCell | undefined {
+  if (!positions.length) {
+    return undefined;
+  }
+  const avgReel = positions.reduce((sum, cell) => sum + cell.reel, 0) / positions.length;
+  const avgRow = positions.reduce((sum, cell) => sum + cell.row, 0) / positions.length;
+  let best = positions[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const cell of positions) {
+    const score = Math.abs(cell.reel - avgReel) + Math.abs(cell.row - avgRow);
+    if (score < bestScore) {
+      bestScore = score;
+      best = cell;
+    }
+  }
+  return best;
+}
+
 function serializeOverlay(cell?: BoardCell) {
-  if (!cell) return { reel: 0, row: 0 };
+  if (!cell) return { reel: 0, row: 1 };
   return { reel: cell.reel, row: cell.row + 1 };
 }
 
