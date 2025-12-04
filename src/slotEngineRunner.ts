@@ -4,10 +4,10 @@ import { isMainThread, workerData } from 'worker_threads';
 import { candyCarnage1000Game } from './games/candyCarnage1000/config';
 
 const SIM_RUNS = {
-  base: 5_000,
-  bonus_hunt: 2_500,
-  regular_buy: 1_000,
-  super_buy: 1_000,
+  base: 100,
+  bonus_hunt: 100,
+  regular_buy: 100,
+  super_buy: 100,
 };
 const DEFAULT_CONCURRENCY = parseInt(process.env.SLOT_ENGINE_CONCURRENCY || '', 10) || os.cpus().length || 4;
 const VERBOSE_PROGRESS = process.env.SLOT_ENGINE_PROGRESS || 'detailed';
