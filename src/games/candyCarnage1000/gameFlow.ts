@@ -237,6 +237,10 @@ function playSpin(
     const tumbleResult = ctx.services.board.tumbleBoard(
       clearedPositions.map((pos) => ({ reelIdx: pos.reel, rowIdx: pos.row })),
     );
+    if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
+      applyMultipliersToNewSymbols(tumbleResult.newBoardSymbols, ctx, opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular');
+      assignBombMultipliers(ctx, opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular');
+    }
     recordTumbleBoard(ctx, clearedPositions, tumbleResult);
 
     if (opts.spinType === SPIN_TYPE.FREE_SPINS && bombSum > 0) {
@@ -251,9 +255,6 @@ function playSpin(
       }
     }
 
-    if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
-      assignBombMultipliers(ctx, opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular');
-    }
   }
 
   ctx.services.wallet.confirmSpinWin();
@@ -401,6 +402,23 @@ function assignBombMultipliers(ctx: CandyContext, bonusType: BonusType) {
       }
     }
   }
+}
+
+function applyMultipliersToNewSymbols(
+  newSymbols: Record<string, GameSymbol[]>,
+  ctx: CandyContext,
+  bonusType: BonusType,
+) {
+  const rng = ctx.services.rng;
+  const availableValues = bonusType === 'super' ? SUPER_BOMB_VALUES : REGULAR_BOMB_VALUES;
+  Object.values(newSymbols ?? {}).forEach((symbols) => {
+    symbols?.forEach((symbol) => {
+      if (symbol?.id === 'M' && !symbol.properties.has('multiplier')) {
+        const multiplier = rng.randomItem(availableValues);
+        symbol.properties.set('multiplier', multiplier);
+      }
+    });
+  });
 }
 
 function determineBonusTrigger(info: ScatterInfo): BonusType | undefined {
