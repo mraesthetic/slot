@@ -164,7 +164,7 @@ const gameModes = defineGameModes({
     isBonusBuy: true,
     resultSetOverrides: {
       forceFreespins: true,
-      userData: { forcedBonusType: 'regular' },
+      userData: { forcedBonusType: 'regular', allowZeroWin: true },
     },
   }),
   super_buy: createGameMode({
@@ -173,7 +173,7 @@ const gameModes = defineGameModes({
     isBonusBuy: true,
     resultSetOverrides: {
       forceFreespins: true,
-      userData: { forcedBonusType: 'super' },
+      userData: { forcedBonusType: 'super', allowZeroWin: true },
     },
   }),
 });
