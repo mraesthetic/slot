@@ -484,7 +484,6 @@ function recordReveal(ctx: CandyContext, spinType: SpinType) {
     gameType: spinType === SPIN_TYPE.BASE_GAME ? 'basegame' : 'freegame',
     board: serializeFullBoard(ctx),
     paddingPositions: [...EMPTY_PADDING],
-    anticipation: [...EMPTY_PADDING],
   });
 }
 
@@ -661,7 +660,18 @@ function getWinLevel(amount: number) {
 
 function serializeFullBoard(ctx: CandyContext) {
   const board = ctx.services.board.getBoardReels();
-  return board.map((reel) => reel.map(toRawSymbol));
+  const paddingTop = ctx.services.board.getPaddingTop();
+  const paddingBottom = ctx.services.board.getPaddingBottom();
+
+  return board.map((reel, index) => {
+    const column: RawSymbolPayload[] = [];
+    const topSymbol = paddingTop[index]?.[0] ?? null;
+    column.push(toRawSymbol(topSymbol));
+    column.push(...reel.map(toRawSymbol));
+    const bottomSymbol = paddingBottom[index]?.[0] ?? null;
+    column.push(toRawSymbol(bottomSymbol));
+    return column;
+  });
 }
 
 function serializePositions(positions: BoardCell[] = ZERO_POSITIONS) {
