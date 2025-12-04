@@ -677,7 +677,7 @@ function serializeFullBoard(ctx: CandyContext) {
 function serializePositions(positions: BoardCell[] = ZERO_POSITIONS) {
   return positions.map((pos) => ({
     reel: pos.reel,
-    row: pos.row,
+    row: pos.row + 1,
   }));
 }
 
@@ -705,7 +705,7 @@ function buildClusterMeta(cluster: ClusterWin) {
 
 function serializeOverlay(cell?: BoardCell) {
   if (!cell) return { reel: 0, row: 0 };
-  return { reel: cell.reel, row: cell.row };
+  return { reel: cell.reel, row: cell.row + 1 };
 }
 
 function forceScatterLayout(ctx: CandyContext, bonusType: BonusType) {
