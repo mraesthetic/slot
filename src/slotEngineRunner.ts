@@ -89,7 +89,10 @@ const patchResultSetAllowZeroWin = () => {
     }
 
     const allowZero = Boolean(
-      this.userData?.allowZeroWin || ctx.state.currentResultSet?.userData?.allowZeroWin,
+      this.userData?.allowZeroWin ||
+        ctx.state.currentResultSet?.userData?.allowZeroWin ||
+        ctx.state.currentGameMode === 'base' ||
+        ctx.state.currentGameMode === 'bonus_hunt',
     );
     const freespinsMet = this.forceFreespins ? ctx.state.triggeredFreespins : true;
     const maxWinMet = this.forceMaxWin ? win >= ctx.config.maxWinX : true;
