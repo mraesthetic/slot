@@ -6,10 +6,10 @@ import { ResultSet } from '@slot-engine/core';
 import { candyCarnage1000Game } from './games/candyCarnage1000/config';
 
 const SIM_RUNS = {
-  base: 100,
-  bonus_hunt: 100,
-  regular_buy: 100,
-  super_buy: 100,
+  base: 40_000,
+  bonus_hunt: 40_000,
+  regular_buy: 40_000,
+  super_buy: 40_000,
 };
 const DEFAULT_CONCURRENCY = parseInt(process.env.SLOT_ENGINE_CONCURRENCY || '', 10) || os.cpus().length || 4;
 const VERBOSE_PROGRESS = process.env.SLOT_ENGINE_PROGRESS || 'detailed';
