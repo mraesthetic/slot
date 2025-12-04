@@ -156,9 +156,11 @@ const createGameMode = (opts: {
   });
 };
 
+const ALLOW_ZERO_BASE_MODES: ResultSetOverride = { userData: { allowZeroWin: true } };
+
 const gameModes = defineGameModes({
-  base: createGameMode({ name: 'base', cost: 1 }),
-  bonus_hunt: createGameMode({ name: 'bonus_hunt', cost: 3 }),
+  base: createGameMode({ name: 'base', cost: 1, resultSetOverrides: ALLOW_ZERO_BASE_MODES }),
+  bonus_hunt: createGameMode({ name: 'bonus_hunt', cost: 3, resultSetOverrides: ALLOW_ZERO_BASE_MODES }),
   regular_buy: createGameMode({
     name: 'regular_buy',
     cost: 100,
