@@ -151,11 +151,13 @@ export async function runSlotEngineSimulation() {
     console.log(`[slot-engine] still running at ${new Date().toISOString()}`);
   }, 60_000);
 
+  const debugSimulations = process.env.SLOT_ENGINE_DEBUG === '1';
+
   await candyCarnage1000Game.runTasks({
     doSimulation: true,
     doAnalysis: false,
     simulationOpts: {
-      debug: true,
+      debug: debugSimulations,
     },
     analysisOpts: {
       gameModes: Object.keys(SIM_RUNS),
