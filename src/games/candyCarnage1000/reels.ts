@@ -5,30 +5,23 @@ type ModeName = 'base' | 'bonus_hunt' | 'regular_buy' | 'super_buy';
 const BASE_REEL_LENGTH = 220;
 const BONUS_HUNT_REEL_LENGTH = 200;
 const BASE_MAX_RUN = 2;
-const BASE_CLUSTER_HOTSPOTS = 1;
-const BASE_CLUSTER_WIDTH = 2;
 const BONUS_SCATTER_GAP = 10;
 const BONUS_HUNT_MAX_RUN = 2;
-const BONUS_HUNT_CLUSTER_HOTSPOTS = 2;
-const BONUS_HUNT_CLUSTER_WIDTH = 2;
-const BONUS_HUNT_EXTRA_SCATTERS = 2;
-const BONUS_HUNT_SUPER_SCATTER_EVERY = 6;
-const REGULAR_BONUS_BOMB_RATIO = 0.05;
-const REGULAR_PROMOTION_CHANCE = 0.15;
-const REGULAR_CLUSTER_HOTSPOTS = 2;
-const REGULAR_CLUSTER_WIDTH = 3;
-const SUPER_BONUS_BOMB_RATIO = 0.08;
-const SUPER_BONUS_PROMOTION_CHANCE = 0.3;
-const SUPER_CLUSTER_HOTSPOTS = 4;
-const SUPER_CLUSTER_WIDTH = 4;
+const BASE_SCATTER_COUNT = 2;
+const BONUS_HUNT_SCATTER_COUNT = 4;
+const BONUS_HUNT_SUPER_SCATTER_COUNT = 1;
+const REGULAR_BONUS_BOMB_RATIO = 0.03;
+const REGULAR_PROMOTION_CHANCE = 0.1;
+const SUPER_BONUS_BOMB_RATIO = 0.06;
+const SUPER_BONUS_PROMOTION_CHANCE = 0.25;
 const SUPER_SCATTER_REEL = 2;
 const RNG_SEEDS = [101, 203, 307, 401, 503, 607];
 
 const BASE_SYMBOL_WEIGHTS: Record<(typeof PAY_SYMBOL_IDS)[number], number> = {
-  H1: 3,
-  H2: 3,
-  H3: 4,
-  H4: 5,
+  H1: 2,
+  H2: 2,
+  H3: 3,
+  H4: 4,
   L1: 10,
   L2: 10,
   L3: 10,
@@ -70,17 +63,34 @@ function pickSymbol(
 
 function buildSymbolStrip(length: number, rng: () => number, maxRun = 2) {
   const strip: string[] = [];
+  let prev = '';
+  let run = 0;
   while (strip.length < length) {
     const candidate = pickSymbol(BASE_SYMBOL_WEIGHTS, rng);
-    if (strip.length >= maxRun) {
-      const recent = strip.slice(strip.length - maxRun);
-      if (recent.every((symbol) => symbol === candidate)) {
+    if (candidate === prev) {
+      if (run >= maxRun) {
         continue;
       }
+      run += 1;
+    } else {
+      prev = candidate;
+      run = 1;
     }
     strip.push(candidate);
   }
   return strip;
+}
+
+function insertScatterSymbols(strip: string[], rng: () => number, symbol: string, count: number) {
+  const length = strip.length;
+  const positions = new Set<number>();
+  while (positions.size < count) {
+    const idx = Math.floor(rng() * length);
+    positions.add(idx);
+  }
+  for (const position of positions) {
+    strip[position] = symbol;
+  }
 }
 
 function getSymbolPositions(strip: string[], symbol: string) {
@@ -151,81 +161,23 @@ function promoteLowSymbols(strip: string[], rng: () => number, probability: numb
   }
 }
 
-function injectClusterHotspots(
-  strip: string[],
-  rng: () => number,
-  opts: { count: number; width: number },
-) {
-  const { count, width } = opts;
-  for (let i = 0; i < count; i += 1) {
-    const anchor = Math.floor(rng() * strip.length);
-    const symbol = pickSymbol(BASE_SYMBOL_WEIGHTS, rng);
-    for (let j = 0; j < width; j += 1) {
-      const idx = (anchor + j) % strip.length;
-      strip[idx] = symbol;
-    }
+const BASE_REELS = Array.from({ length: REELS }, (_, index) => {
+  const rng = createRng(RNG_SEEDS[index] ?? 0);
+  const strip = buildSymbolStrip(BASE_REEL_LENGTH, rng, BASE_MAX_RUN);
+  insertScatterSymbols(strip, rng, 'S', BASE_SCATTER_COUNT);
+  if (index === SUPER_SCATTER_REEL) {
+    insertScatterSymbols(strip, rng, 'BS', 1);
   }
-}
-
-function generateBaseReels() {
-  return Array.from({ length: REELS }, (_, index) => {
-    const seed = RNG_SEEDS[index] ?? (101 + index * 97);
-    const rng = createRng(seed);
-    const strip = buildSymbolStrip(BASE_REEL_LENGTH, rng, BASE_MAX_RUN);
-    injectClusterHotspots(strip, rng, { count: BASE_CLUSTER_HOTSPOTS, width: BASE_CLUSTER_WIDTH });
-    if (index === SUPER_SCATTER_REEL) {
-      placeSymbolWithGap(strip, 'BS', rng, BONUS_SCATTER_GAP);
-    } else {
-      placeSymbolWithGap(strip, 'S', rng, BONUS_SCATTER_GAP);
-    }
-    return strip;
-  });
-}
-
-const BASE_REELS = generateBaseReels();
+  return strip;
+});
 
 const BONUS_HUNT_REELS = Array.from({ length: REELS }, (_, index) => {
-  const seed = (RNG_SEEDS[index] ?? 0) + 900;
-  const rng = createRng(seed);
+  const rng = createRng((RNG_SEEDS[index] ?? 0) + 5000);
   const strip = buildSymbolStrip(BONUS_HUNT_REEL_LENGTH, rng, BONUS_HUNT_MAX_RUN);
-  injectClusterHotspots(strip, rng, {
-    count: BONUS_HUNT_CLUSTER_HOTSPOTS,
-    width: BONUS_HUNT_CLUSTER_WIDTH,
-  });
-
-  // Scatter handling
-  const superScatterPositions: number[] = [];
+  insertScatterSymbols(strip, rng, 'S', BONUS_HUNT_SCATTER_COUNT);
   if (index === SUPER_SCATTER_REEL) {
-    placeSymbolWithGap(strip, 'BS', rng, BONUS_SCATTER_GAP);
-    superScatterPositions.push(...getSymbolPositions(strip, 'BS'));
-  } else {
-    placeSymbolWithGap(strip, 'S', rng, BONUS_SCATTER_GAP, BONUS_HUNT_EXTRA_SCATTERS);
+    insertScatterSymbols(strip, rng, 'BS', BONUS_HUNT_SUPER_SCATTER_COUNT);
   }
-
-  // Ensure no reel ends up with multiple scatters at the same stop
-  const scatterPositions = new Set<number>([
-    ...getSymbolPositions(strip, 'S'),
-    ...superScatterPositions,
-  ]);
-  for (const pos of scatterPositions) {
-    // Remove adjacent duplicates
-    const next = (pos + 1) % strip.length;
-    if (scatterPositions.has(next)) {
-      const fallback = pickSymbol(BASE_SYMBOL_WEIGHTS, rng);
-      strip[next] = fallback;
-      scatterPositions.delete(next);
-    }
-  }
-
-  // Force periodic super scatter for hunt strips
-  if (index !== SUPER_SCATTER_REEL && BONUS_HUNT_SUPER_SCATTER_EVERY > 0) {
-    const anchor = rng();
-    const targetIndex = Math.floor(anchor * strip.length / BONUS_HUNT_SUPER_SCATTER_EVERY) * BONUS_HUNT_SUPER_SCATTER_EVERY;
-    if (targetIndex < strip.length) {
-      strip[targetIndex] = 'BS';
-    }
-  }
-
   return strip;
 });
 
@@ -233,12 +185,8 @@ const REGULAR_BONUS_REELS = BASE_REELS.map((reel, index) => {
   const rng = createRng((RNG_SEEDS[index] ?? 0) + 2_000);
   const strip = [...reel];
   removeScatters(strip, rng);
-  injectClusterHotspots(strip, rng, {
-    count: REGULAR_CLUSTER_HOTSPOTS,
-    width: REGULAR_CLUSTER_WIDTH,
-  });
   promoteLowSymbols(strip, rng, REGULAR_PROMOTION_CHANCE);
-  injectBombs(strip, rng, Math.max(6, Math.round(strip.length * REGULAR_BONUS_BOMB_RATIO)));
+  injectBombs(strip, rng, Math.max(2, Math.round(strip.length * REGULAR_BONUS_BOMB_RATIO)));
   return strip;
 });
 
@@ -247,7 +195,6 @@ const SUPER_BONUS_REELS_PER_REEL = BASE_REELS.map((reel, index) => {
   const strip = [...reel];
   removeScatters(strip, rng);
   promoteLowSymbols(strip, rng, SUPER_BONUS_PROMOTION_CHANCE);
-  injectClusterHotspots(strip, rng, { count: SUPER_CLUSTER_HOTSPOTS, width: SUPER_CLUSTER_WIDTH });
   injectBombs(strip, rng, Math.max(4, Math.round(strip.length * SUPER_BONUS_BOMB_RATIO)));
   return strip;
 });

@@ -63,6 +63,10 @@ const BASE_REEL_INDICES = [...Array(REELS).keys()];
 const ZERO_POSITIONS: BoardCell[] = [];
 const EMPTY_PADDING = Array(REELS).fill(0);
 
+function pushEvent(ctx: CandyContext, event: Record<string, unknown>) {
+  ctx.services.data.addBookEvent(event as any);
+}
+
 export const onHandleGameFlow: GameHooks['onHandleGameFlow'] = (ctx) => {
   resetUserData(ctx);
 
@@ -213,9 +217,8 @@ function playSpin(
     tumbleIndex += 1;
     const tumbleWin = clusters.reduce((sum, cluster) => sum + cluster.payout, 0);
 
-    recordClusterWin(ctx, clusters, tumbleIndex, opts.spinType);
+    recordClusterWin(ctx, clusters);
 
-    let appliedWin = tumbleWin;
     let bombSum = 0;
     if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
       bombSum = clusters
@@ -224,13 +227,6 @@ function playSpin(
           const multiplier = cell.symbol.properties.get('multiplier') ?? 0;
           return sum + multiplier;
         }, 0);
-
-      if (bombSum > 0) {
-        const multiplier = bombSum > 0 ? bombSum : 1;
-        appliedWin = tumbleWin * multiplier;
-        ctx.state.userData.bonusMultiplierStack.push(multiplier);
-        recordBombMultiplier(ctx, clusters, tumbleWin, multiplier, appliedWin);
-      }
     }
 
     ctx.services.wallet.addTumbleWin(tumbleWin);
@@ -244,11 +240,15 @@ function playSpin(
     recordTumbleBoard(ctx, clearedPositions, tumbleResult);
 
     if (opts.spinType === SPIN_TYPE.FREE_SPINS && bombSum > 0) {
-      const bonusWin = tumbleWin * (bombSum - 1);
-      ctx.services.wallet.addTumbleWin(bonusWin);
-      totalTumbleWin += bonusWin;
-      recordBombMultiplier(ctx, clusters, tumbleWin, bombSum, totalTumbleWin);
-      recordTumbleWin(ctx, totalTumbleWin);
+      const multiplier = Math.max(bombSum, 1);
+      const bonusWin = tumbleWin * (multiplier - 1);
+      if (bonusWin > 0) {
+        ctx.state.userData.bonusMultiplierStack.push(multiplier);
+        recordBombMultiplier(ctx, clusters, tumbleWin, multiplier, tumbleWin * multiplier);
+        ctx.services.wallet.addTumbleWin(bonusWin);
+        totalTumbleWin += bonusWin;
+        recordTumbleWin(ctx, totalTumbleWin);
+      }
     }
 
     if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
@@ -457,43 +457,37 @@ function startFreeSpins(
   ctx.services.game.awardFreespins(INITIAL_FREE_SPINS);
   ctx.state.triggeredFreespins = true;
 
-  recordFreeSpinTrigger(ctx, scatterInfo, type, options);
+  recordFreeSpinTrigger(ctx, scatterInfo, type);
 }
 
 function recordReveal(ctx: CandyContext, spinType: SpinType) {
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'reveal',
-    data: {
-      gameType: spinType === SPIN_TYPE.BASE_GAME ? 'basegame' : 'freegame',
-      board: serializeFullBoard(ctx),
-      paddingPositions: [...EMPTY_PADDING],
-      anticipation: [...EMPTY_PADDING],
-    },
+    gameType: spinType === SPIN_TYPE.BASE_GAME ? 'basegame' : 'freegame',
+    board: serializeFullBoard(ctx),
+    paddingPositions: [...EMPTY_PADDING],
+    anticipation: [...EMPTY_PADDING],
   });
 }
 
-function recordClusterWin(ctx: CandyContext, clusters: ClusterWin[], tumbleIndex: number, spinType: SpinType) {
+function recordClusterWin(ctx: CandyContext, clusters: ClusterWin[]) {
   const total = clusters.reduce((sum, cluster) => sum + cluster.payout, 0);
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'winInfo',
-    data: {
-      totalWin: total,
-      wins: clusters.map((cluster) => ({
-        symbol: cluster.symbolId,
-        win: cluster.payout,
-        positions: serializePositions(cluster.positions),
-        meta: buildClusterMeta(cluster),
-      })),
-    },
+    totalWin: total,
+    wins: clusters.map((cluster) => ({
+      symbol: cluster.symbolId,
+      win: cluster.payout,
+      positions: serializePositions(cluster.positions),
+      meta: buildClusterMeta(cluster),
+    })),
   });
 }
 
 function recordTumbleWin(ctx: CandyContext, total: number) {
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'updateTumbleWin',
-    data: {
-      amount: total,
-    },
+    amount: total,
   });
 }
 
@@ -504,24 +498,22 @@ function recordBombMultiplier(
   boardMultiplier: number,
   totalWin: number,
 ) {
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'boardMultiplierInfo',
-    data: {
-      multInfo: {
-        positions: clusters
-          .flatMap((cluster) => cluster.bombPositions)
-          .map((cell) => ({
-            reel: cell.reel,
-            row: cell.row,
-            name: cell.symbol.id,
-            multiplier: cell.symbol.properties.get('multiplier') ?? 0,
-          })),
-      },
-      winInfo: {
-        tumbleWin,
-        boardMult: boardMultiplier,
-        totalWin,
-      },
+    multInfo: {
+      positions: clusters
+        .flatMap((cluster) => cluster.bombPositions)
+        .map((cell) => ({
+          reel: cell.reel,
+          row: cell.row,
+          name: cell.symbol.id,
+          multiplier: cell.symbol.properties.get('multiplier') ?? 0,
+        })),
+    },
+    winInfo: {
+      tumbleWin,
+      boardMult: boardMultiplier,
+      totalWin,
     },
   });
 }
@@ -529,52 +521,48 @@ function recordBombMultiplier(
 function recordTumbleBoard(
   ctx: CandyContext,
   cleared: BoardCell[],
-  tumbleResult: { newBoardSymbols: Record<string, GameSymbol[]>; newPaddingTopSymbols: Record<string, GameSymbol[]> },
+  tumbleResult: { newBoardSymbols: Record<string, GameSymbol[]> },
 ) {
-  const newSymbols: RawSymbolPayload[][] = [];
-  for (let reel = 0; reel < REELS; reel++) {
-    const entries = tumbleResult.newBoardSymbols?.[String(reel)] ?? [];
-    newSymbols.push(entries.map(toRawSymbol));
-  }
+  const newSymbols: RawSymbolPayload[][] = Array.from({ length: REELS }, () => []);
+  Object.entries(tumbleResult.newBoardSymbols ?? {}).forEach(([reel, symbols]) => {
+    const index = Number(reel);
+    if (!Number.isNaN(index)) {
+      newSymbols[index] = symbols.map(toRawSymbol);
+    }
+  });
 
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'tumbleBoard',
-    data: {
-      explodingSymbols: serializePositions(cleared),
-      newSymbols,
-    },
+    explodingSymbols: serializePositions(cleared),
+    newSymbols,
   });
 }
 
 function recordScatterWinInfo(ctx: CandyContext, scatterInfo: ScatterInfo, payout: number) {
   const positions = [...scatterInfo.scatterPositions, ...scatterInfo.superScatterPositions];
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'winInfo',
-    data: {
-      totalWin: payout,
-      wins: [
-        {
-          symbol: scatterInfo.superScatterCount > 0 ? 'BS' : 'S',
-          win: payout,
-          positions: serializePositions(positions),
-          meta: {
-            clusterMult: 1,
-            winWithoutMult: payout,
-            overlay: serializeOverlay(positions[0]),
-          },
+    totalWin: payout,
+    wins: [
+      {
+        symbol: scatterInfo.superScatterCount > 0 ? 'BS' : 'S',
+        win: payout,
+        positions: serializePositions(positions),
+        meta: {
+          clusterMult: 1,
+          winWithoutMult: payout,
+          overlay: serializeOverlay(positions[0]),
         },
-      ],
-    },
+      },
+    ],
   });
 }
 
 function recordSetTotalWin(ctx: CandyContext, amount: number) {
   if (amount <= 0) return;
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'setTotalWin',
-    data: {
-      amount,
-    },
+    amount,
   });
   const level = getWinLevel(amount);
   if (level >= 6) {
@@ -583,75 +571,55 @@ function recordSetTotalWin(ctx: CandyContext, amount: number) {
 }
 
 function recordSetWin(ctx: CandyContext, amount: number, level: number) {
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'setWin',
-    data: {
-      amount,
-      winLevel: level,
-    },
+    amount,
+    winLevel: level,
   });
 }
 
 function recordUpdateFreeSpin(ctx: CandyContext, spinIndex: number) {
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'updateFreeSpin',
-    data: {
-      amount: spinIndex,
-      total: ctx.state.userData.totalBonusSpinsAwarded,
-    },
+    amount: spinIndex,
+    total: ctx.state.userData.totalBonusSpinsAwarded,
   });
 }
 
 function recordRetrigger(ctx: CandyContext, added: number) {
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'freeSpinRetrigger',
-    data: {
-      totalFs: ctx.state.currentFreespinAmount,
-    },
+    totalFs: ctx.state.currentFreespinAmount,
   });
 }
 
-function recordFreeSpinTrigger(
-  ctx: CandyContext,
-  scatterInfo: ScatterInfo,
-  type: BonusType,
-  options?: { forced?: boolean; skipPayout?: boolean },
-) {
-  ctx.services.data.addBookEvent({
+function recordFreeSpinTrigger(ctx: CandyContext, scatterInfo: ScatterInfo, type: BonusType) {
+  pushEvent(ctx, {
     type: 'freeSpinTrigger',
-    data: {
-      totalFs: ctx.state.userData.totalBonusSpinsAwarded,
-      positions: serializePositions([...scatterInfo.scatterPositions, ...scatterInfo.superScatterPositions]),
-    },
+    totalFs: ctx.state.userData.totalBonusSpinsAwarded,
+    positions: serializePositions([...scatterInfo.scatterPositions, ...scatterInfo.superScatterPositions]),
   });
 
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'enterBonus',
-    data: {
-      reason: type,
-    },
+    reason: type,
   });
 }
 
 function recordFreeSpinEnd(ctx: CandyContext, amount: number) {
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'freeSpinEnd',
-    data: {
-      amount,
-      winLevel: getWinLevel(amount),
-    },
+    amount,
+    winLevel: getWinLevel(amount),
   });
 }
 
 function finalizeSimulation(ctx: CandyContext) {
   const totalWin = ctx.services.wallet.getCurrentWin();
-  ctx.services.data.addBookEvent({
+  pushEvent(ctx, {
     type: 'finalWin',
-    data: {
-      amount: totalWin,
-      winLevel: getWinLevel(totalWin),
-      game: GAME_NAME,
-    },
+    amount: totalWin,
+    winLevel: getWinLevel(totalWin),
   });
 }
 
@@ -677,11 +645,24 @@ function serializeFullBoard(ctx: CandyContext) {
   const board = ctx.services.board.getBoardReels();
   const paddingTop = ctx.services.board.getPaddingTop();
   const paddingBottom = ctx.services.board.getPaddingBottom();
+  const padCount = ctx.config.padSymbols ?? 0;
 
   return board.map((reel, index) => {
-    const top = paddingTop[index]?.map(toRawSymbol) ?? [];
-    const bottom = paddingBottom[index]?.map(toRawSymbol) ?? [];
-    return [...top, ...reel.map(toRawSymbol), ...bottom];
+    const column: RawSymbolPayload[] = [];
+    const topColumn = paddingTop[index] ?? [];
+    const bottomColumn = paddingBottom[index] ?? [];
+
+    for (let i = 0; i < padCount; i += 1) {
+      column.push(toRawSymbol(topColumn[i]));
+    }
+
+    column.push(...reel.map(toRawSymbol));
+
+    for (let i = 0; i < padCount; i += 1) {
+      column.push(toRawSymbol(bottomColumn[i]));
+    }
+
+    return column;
   });
 }
 
