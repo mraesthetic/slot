@@ -5,12 +5,38 @@ import { ResultSet } from '@slot-engine/core';
 
 import { candyCarnage1000Game } from './games/candyCarnage1000/config';
 
-const SIM_RUNS = {
+const SIMULATION_MODES = ['base', 'bonus_hunt', 'regular_buy', 'super_buy'] as const;
+type SimulationMode = (typeof SIMULATION_MODES)[number];
+
+const SIM_RUN_DEFAULTS: Record<SimulationMode, number> = {
   base: 40_000,
   bonus_hunt: 40_000,
   regular_buy: 40_000,
   super_buy: 40_000,
 };
+
+const parsePositiveInt = (value?: string | null) => {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+};
+
+const resolveSimRunForMode = (mode: SimulationMode) => {
+  const modeKey = `SLOT_ENGINE_SIM_RUNS_${mode.toUpperCase()}`;
+  return (
+    parsePositiveInt(process.env[modeKey]) ??
+    parsePositiveInt(process.env.SLOT_ENGINE_SIM_RUNS) ??
+    SIM_RUN_DEFAULTS[mode]
+  );
+};
+
+const SIM_RUNS = SIMULATION_MODES.reduce(
+  (acc, mode) => {
+    acc[mode] = resolveSimRunForMode(mode);
+    return acc;
+  },
+  {} as Record<SimulationMode, number>,
+);
 const DEFAULT_CONCURRENCY = parseInt(process.env.SLOT_ENGINE_CONCURRENCY || '', 10) || os.cpus().length || 4;
 const VERBOSE_PROGRESS = process.env.SLOT_ENGINE_PROGRESS || 'detailed';
 const DEFAULT_PROGRESS_MODE_STRING = 'regular_buy,super_buy';
@@ -151,13 +177,11 @@ export async function runSlotEngineSimulation() {
     console.log(`[slot-engine] still running at ${new Date().toISOString()}`);
   }, 60_000);
 
-  const debugSimulations = process.env.SLOT_ENGINE_DEBUG === '1';
-
   await candyCarnage1000Game.runTasks({
     doSimulation: true,
     doAnalysis: false,
     simulationOpts: {
-      debug: debugSimulations,
+      debug: false,
     },
     analysisOpts: {
       gameModes: Object.keys(SIM_RUNS),
