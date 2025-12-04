@@ -1,0 +1,24 @@
+{
+  "name": "slot",
+  "version": "1.0.0",
+  "description": "Candy Carnage 1000 Slot Engine prototype",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "lint": "tsc --noEmit",
+    "simulate": "ts-node scripts/slot-engine-runner.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@slot-engine/core": "^0.1.3"
+  }
+}
