@@ -661,27 +661,7 @@ function getWinLevel(amount: number) {
 
 function serializeFullBoard(ctx: CandyContext) {
   const board = ctx.services.board.getBoardReels();
-  const paddingTop = ctx.services.board.getPaddingTop();
-  const paddingBottom = ctx.services.board.getPaddingBottom();
-  const padCount = ctx.config.padSymbols ?? 0;
-
-  return board.map((reel, index) => {
-    const column: RawSymbolPayload[] = [];
-    const topColumn = paddingTop[index] ?? [];
-    const bottomColumn = paddingBottom[index] ?? [];
-
-    for (let i = 0; i < padCount; i += 1) {
-      column.push(toRawSymbol(topColumn[i]));
-    }
-
-    column.push(...reel.map(toRawSymbol));
-
-    for (let i = 0; i < padCount; i += 1) {
-      column.push(toRawSymbol(bottomColumn[i]));
-    }
-
-    return column;
-  });
+  return board.map((reel) => reel.map(toRawSymbol));
 }
 
 function serializePositions(positions: BoardCell[] = ZERO_POSITIONS) {
