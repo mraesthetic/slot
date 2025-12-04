@@ -31,6 +31,7 @@ import { getReelsForMode } from './reels';
 const SYMBOLS_PER_REEL = Array.from({ length: REELS }, () => VISIBLE_ROWS);
 type CandyCarnageBonusType = 'regular' | 'super';
 type ResultSetOverride = Partial<ConstructorParameters<typeof ResultSet>[0]>;
+const ALLOW_ZERO_WIN_BUYS = process.env.SLOT_ENGINE_ALLOW_ZERO_BUY === '1';
 
 const createClusterPays = (tiers: { low: number; mid: number; high: number }) => {
   const pays: Record<number, number> = {};
@@ -164,7 +165,7 @@ const gameModes = defineGameModes({
     isBonusBuy: true,
     resultSetOverrides: {
       forceFreespins: true,
-      userData: { forcedBonusType: 'regular', allowZeroWin: true },
+      userData: { forcedBonusType: 'regular', allowZeroWin: ALLOW_ZERO_WIN_BUYS },
     },
   }),
   super_buy: createGameMode({
@@ -173,7 +174,7 @@ const gameModes = defineGameModes({
     isBonusBuy: true,
     resultSetOverrides: {
       forceFreespins: true,
-      userData: { forcedBonusType: 'super', allowZeroWin: true },
+      userData: { forcedBonusType: 'super', allowZeroWin: ALLOW_ZERO_WIN_BUYS },
     },
   }),
 });

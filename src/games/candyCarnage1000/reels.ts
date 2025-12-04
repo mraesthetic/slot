@@ -1,70 +1,184 @@
+import { PAY_SYMBOL_IDS, REELS, VISIBLE_ROWS } from './constants';
+
 type ModeName = 'base' | 'bonus_hunt' | 'regular_buy' | 'super_buy';
 
-const BASE_REELS: string[][] = [
-  [
-    'L1', 'L3', 'L4', 'H2', 'L5', 'L2', 'L3', 'L1', 'L4', 'H3', 'S', 'L2', 'L5', 'L1', 'L4', 'L3', 'H4', 'L2', 'L1',
-    'L5', 'H2', 'L3', 'L4', 'L1', 'L2', 'H3', 'L5', 'L4', 'L3', 'L2', 'L1', 'L5', 'H1', 'L3', 'L4', 'L2', 'L5', 'L1',
-    'L3', 'L4', 'L2', 'L5', 'L1', 'L3', 'L2', 'L4',
-  ],
-  [
-    'L2', 'L5', 'L1', 'H3', 'L4', 'L2', 'L5', 'L1', 'H2', 'L3', 'L4', 'S', 'L2', 'L5', 'L1', 'H4', 'L3', 'L5', 'L2',
-    'L1', 'H3', 'L4', 'L2', 'L5', 'L1', 'H1', 'L3', 'L4', 'L2', 'L5', 'L1', 'H2', 'L3', 'L4', 'L2', 'L5', 'L1', 'H3',
-    'L4', 'L2', 'L5', 'L1', 'H4', 'L3', 'L5',
-  ],
-  [
-    'L3', 'L2', 'L4', 'L5', 'H3', 'L1', 'L4', 'L2', 'L5', 'H2', 'L3', 'L4', 'L5', 'L1', 'S', 'L4', 'L2', 'L5', 'H3',
-    'L1', 'L4', 'L2', 'L5', 'H2', 'L3', 'L4', 'BS', 'L5', 'L1', 'H4', 'L2', 'L5', 'L3', 'L4', 'L1', 'H1', 'L5', 'L2',
-    'L3', 'L4', 'L1', 'H3', 'L5', 'L2', 'L4',
-  ],
-  [
-    'L4', 'L1', 'L5', 'H3', 'L2', 'L4', 'L1', 'L5', 'H2', 'L3', 'L4', 'L1', 'S', 'L5', 'L2', 'H4', 'L3', 'L4', 'L2',
-    'L5', 'H3', 'L1', 'L4', 'L2', 'L5', 'H2', 'L3', 'L4', 'L1', 'L5', 'H1', 'L2', 'L4', 'L1', 'L5', 'H3', 'L2', 'L4',
-    'L1', 'L5', 'H2', 'L3', 'L4', 'L1', 'L5',
-  ],
-  [
-    'L5', 'L2', 'L3', 'H4', 'L1', 'L5', 'L2', 'L3', 'H2', 'L4', 'L5', 'L2', 'S', 'L3', 'H3', 'L5', 'L2', 'L3', 'H1',
-    'L4', 'L5', 'L2', 'L3', 'H2', 'L4', 'L5', 'L1', 'L3', 'H4', 'L2', 'L5', 'L1', 'L3', 'H2', 'L4', 'L5', 'L1', 'L3',
-    'H3', 'L4', 'L5', 'L2', 'L3', 'H4', 'L1',
-  ],
-  [
-    'L3', 'L4', 'L2', 'H2', 'L5', 'L3', 'L4', 'L1', 'H3', 'L5', 'L3', 'L4', 'L2', 'S', 'L5', 'L3', 'L4', 'L1', 'H4',
-    'L5', 'L3', 'L4', 'L2', 'H3', 'L5', 'L3', 'L4', 'L1', 'H2', 'L5', 'L3', 'L4', 'L2', 'H1', 'L5', 'L3', 'L4', 'L1',
-    'H3', 'L5', 'L3', 'L4', 'L2', 'H4', 'L5',
-  ],
-];
+const BASE_REEL_LENGTH = 120;
+const BONUS_SCATTER_GAP = VISIBLE_ROWS + 1;
+const BONUS_HUNT_EXTRA_SCATTERS = 1;
+const REGULAR_BONUS_BOMB_RATIO = 0.05;
+const SUPER_BONUS_BOMB_RATIO = 0.08;
+const SUPER_BONUS_PROMOTION_CHANCE = 0.35;
+const SUPER_SCATTER_REEL = 2;
+const RNG_SEEDS = [101, 203, 307, 401, 503, 607];
 
-const BONUS_HUNT_REELS = BASE_REELS.map((reel, idx) => {
-  const insertPos = ((idx + 1) * 9) % reel.length;
-  const nextPos = (insertPos + 13) % reel.length;
-  const copy = [...reel];
-  copy.splice(insertPos, 0, 'S');
-  copy.splice(nextPos, 0, 'S');
-  return copy;
-});
+const BASE_SYMBOL_WEIGHTS: Record<(typeof PAY_SYMBOL_IDS)[number], number> = {
+  H1: 1,
+  H2: 2,
+  H3: 3,
+  H4: 4,
+  L1: 7,
+  L2: 9,
+  L3: 10,
+  L4: 11,
+  L5: 12,
+};
 
-function addBombsWithoutSuperScatter(reel: string[], bombCount: number) {
-  const filtered = reel.filter((symbol) => symbol !== 'BS');
-  const result = [...filtered];
-  for (let i = 0; i < bombCount; i += 1) {
-    const insertPos = ((i + 1) * 7) % result.length;
-    result.splice(insertPos, 0, 'M');
-  }
-  return result;
+const PREMIUM_SYMBOLS = ['H1', 'H2', 'H3', 'H4'] as const;
+const LOW_SYMBOLS = ['L1', 'L2', 'L3', 'L4', 'L5'] as const;
+const LOW_SYMBOL_SET = new Set<string>(LOW_SYMBOLS);
+
+function createRng(seed: number) {
+  let value = seed >>> 0;
+  return () => {
+    value |= 0;
+    value = (value + 0x6d2b79f5) | 0;
+    let t = Math.imul(value ^ (value >>> 15), 1 | value);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-function emphasizePremiums(reel: string[]) {
-  return reel.map((symbol, idx) => {
-    if (symbol.startsWith('L') && idx % 10 === 0) {
-      return idx % 20 === 0 ? 'H1' : 'H2';
+function pickSymbol(
+  weights: Record<(typeof PAY_SYMBOL_IDS)[number], number>,
+  rng: () => number,
+): (typeof PAY_SYMBOL_IDS)[number] {
+  const keys = Object.keys(weights) as Array<(typeof PAY_SYMBOL_IDS)[number]>;
+  const total = keys.reduce((sum, key) => sum + weights[key], 0);
+  const target = rng() * total;
+  let cumulative = 0;
+  for (const symbol of keys) {
+    cumulative += weights[symbol];
+    if (target <= cumulative) {
+      return symbol;
     }
-    return symbol;
+  }
+  return keys[keys.length - 1] ?? 'L1';
+}
+
+function buildSymbolStrip(length: number, rng: () => number, maxRun = 2) {
+  const strip: string[] = [];
+  while (strip.length < length) {
+    const candidate = pickSymbol(BASE_SYMBOL_WEIGHTS, rng);
+    if (strip.length >= maxRun) {
+      const recent = strip.slice(strip.length - maxRun);
+      if (recent.every((symbol) => symbol === candidate)) {
+        continue;
+      }
+    }
+    strip.push(candidate);
+  }
+  return strip;
+}
+
+function getSymbolPositions(strip: string[], symbol: string) {
+  const positions: number[] = [];
+  for (let i = 0; i < strip.length; i += 1) {
+    if (strip[i] === symbol) {
+      positions.push(i);
+    }
+  }
+  return positions;
+}
+
+function placeSymbolWithGap(
+  strip: string[],
+  symbol: string,
+  rng: () => number,
+  minGap: number,
+  additionalCopies = 1,
+) {
+  const positions = getSymbolPositions(strip, symbol);
+  const goal = positions.length + additionalCopies;
+  let attempts = 0;
+  while (positions.length < goal && attempts < 5_000) {
+    attempts += 1;
+    const idx = Math.floor(rng() * strip.length);
+    if (strip[idx] === 'M' || strip[idx] === 'BS') continue;
+    if (symbol === 'S' && strip[idx] === 'BS') continue;
+    if (symbol === 'BS' && strip[idx] === 'S') continue;
+    if (positions.some((pos) => Math.abs(pos - idx) < minGap)) continue;
+    strip[idx] = symbol;
+    positions.push(idx);
+  }
+}
+
+function removeScatters(strip: string[], rng: () => number) {
+  for (let i = 0; i < strip.length; i += 1) {
+    if (strip[i] === 'S' || strip[i] === 'BS') {
+      let replacement = pickSymbol(BASE_SYMBOL_WEIGHTS, rng);
+      if (i >= 2 && strip[i - 1] === replacement && strip[i - 2] === replacement) {
+        replacement = 'L5';
+      }
+      strip[i] = replacement;
+    }
+  }
+}
+
+function injectBombs(strip: string[], rng: () => number, count: number) {
+  let added = 0;
+  let attempts = 0;
+  while (added < count && attempts < 5_000) {
+    attempts += 1;
+    const idx = Math.floor(rng() * strip.length);
+    const symbol = strip[idx];
+    if (symbol === 'S' || symbol === 'BS' || symbol === 'M') continue;
+    strip[idx] = 'M';
+    added += 1;
+  }
+}
+
+function promoteLowSymbols(strip: string[], rng: () => number, probability: number) {
+  for (let i = 0; i < strip.length; i += 1) {
+    const current = strip[i];
+    if (!current) continue;
+    if (LOW_SYMBOL_SET.has(current) && rng() < probability) {
+      const premium = PREMIUM_SYMBOLS[Math.floor(rng() * PREMIUM_SYMBOLS.length)] ?? current;
+      strip[i] = premium;
+    }
+  }
+}
+
+function generateBaseReels() {
+  return Array.from({ length: REELS }, (_, index) => {
+    const seed = RNG_SEEDS[index] ?? (101 + index * 97);
+    const rng = createRng(seed);
+    const strip = buildSymbolStrip(BASE_REEL_LENGTH, rng);
+    if (index === SUPER_SCATTER_REEL) {
+      placeSymbolWithGap(strip, 'BS', rng, BONUS_SCATTER_GAP);
+    } else {
+      placeSymbolWithGap(strip, 'S', rng, BONUS_SCATTER_GAP);
+    }
+    return strip;
   });
 }
 
-const REGULAR_BONUS_REELS = BASE_REELS.map((reel) => addBombsWithoutSuperScatter(reel, 3));
-const SUPER_BONUS_REELS_PER_REEL = BASE_REELS.map((reel, idx) =>
-  emphasizePremiums(addBombsWithoutSuperScatter(reel, 5 + (idx % 2))),
-);
+const BASE_REELS = generateBaseReels();
+
+const BONUS_HUNT_REELS = BASE_REELS.map((reel, index) => {
+  const rng = createRng((RNG_SEEDS[index] ?? 0) + 900);
+  const strip = [...reel];
+  if (index !== SUPER_SCATTER_REEL) {
+    placeSymbolWithGap(strip, 'S', rng, BONUS_SCATTER_GAP, BONUS_HUNT_EXTRA_SCATTERS);
+  }
+  return strip;
+});
+
+const REGULAR_BONUS_REELS = BASE_REELS.map((reel, index) => {
+  const rng = createRng((RNG_SEEDS[index] ?? 0) + 2_000);
+  const strip = [...reel];
+  removeScatters(strip, rng);
+  injectBombs(strip, rng, Math.max(4, Math.round(strip.length * REGULAR_BONUS_BOMB_RATIO)));
+  return strip;
+});
+
+const SUPER_BONUS_REELS_PER_REEL = BASE_REELS.map((reel, index) => {
+  const rng = createRng((RNG_SEEDS[index] ?? 0) + 3_000);
+  const strip = [...reel];
+  removeScatters(strip, rng);
+  promoteLowSymbols(strip, rng, SUPER_BONUS_PROMOTION_CHANCE);
+  injectBombs(strip, rng, Math.max(6, Math.round(strip.length * SUPER_BONUS_BOMB_RATIO)));
+  return strip;
+});
 
 const MODE_BASE_REELS: Record<ModeName, string[][]> = {
   base: BASE_REELS,

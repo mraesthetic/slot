@@ -13,6 +13,7 @@ const SIM_RUNS = {
 };
 const DEFAULT_CONCURRENCY = parseInt(process.env.SLOT_ENGINE_CONCURRENCY || '', 10) || os.cpus().length || 4;
 const VERBOSE_PROGRESS = process.env.SLOT_ENGINE_PROGRESS || 'detailed';
+const ALLOW_ZERO_WIN_BUYS = process.env.SLOT_ENGINE_ALLOW_ZERO_BUY === '1';
 const DEFAULT_PROGRESS_MODE_STRING = 'regular_buy,super_buy';
 const PROGRESS_MODE_FILTER = new Set(
   (process.env.SLOT_ENGINE_PROGRESS_MODES ?? DEFAULT_PROGRESS_MODE_STRING)
@@ -88,9 +89,9 @@ const patchResultSetAllowZeroWin = () => {
       return true;
     }
 
-    const allowZero = Boolean(
-      this.userData?.allowZeroWin || ctx.state.currentResultSet?.userData?.allowZeroWin,
-    );
+    const allowZero =
+      ALLOW_ZERO_WIN_BUYS &&
+      Boolean(this.userData?.allowZeroWin || ctx.state.currentResultSet?.userData?.allowZeroWin);
     const freespinsMet = this.forceFreespins ? ctx.state.triggeredFreespins : true;
     const maxWinMet = this.forceMaxWin ? win >= ctx.config.maxWinX : true;
     if (allowZero && win === 0 && freespinsMet && maxWinMet) {
@@ -150,7 +151,7 @@ export async function runSlotEngineSimulation() {
 
   await candyCarnage1000Game.runTasks({
     doSimulation: true,
-    doAnalysis: isMainThread,
+    doAnalysis: false,
     simulationOpts: {
       debug: true,
     },
