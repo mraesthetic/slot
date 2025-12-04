@@ -2,33 +2,33 @@ import { PAY_SYMBOL_IDS, REELS, VISIBLE_ROWS } from './constants';
 
 type ModeName = 'base' | 'bonus_hunt' | 'regular_buy' | 'super_buy';
 
-const BASE_REEL_LENGTH = 90;
-const BASE_MAX_RUN = 4;
-const BASE_CLUSTER_HOTSPOTS = 5;
-const BASE_CLUSTER_WIDTH = 4;
-const BONUS_SCATTER_GAP = 4;
-const BONUS_HUNT_EXTRA_SCATTERS = 3;
-const REGULAR_BONUS_BOMB_RATIO = 0.12;
-const REGULAR_PROMOTION_CHANCE = 0.2;
-const REGULAR_CLUSTER_HOTSPOTS = 6;
-const REGULAR_CLUSTER_WIDTH = 5;
-const SUPER_BONUS_BOMB_RATIO = 0.05;
-const SUPER_BONUS_PROMOTION_CHANCE = 0.2;
-const SUPER_CLUSTER_HOTSPOTS = 4;
-const SUPER_CLUSTER_WIDTH = 3;
+const BASE_REEL_LENGTH = 60;
+const BASE_MAX_RUN = 5;
+const BASE_CLUSTER_HOTSPOTS = 12;
+const BASE_CLUSTER_WIDTH = 6;
+const BONUS_SCATTER_GAP = 3;
+const BONUS_HUNT_EXTRA_SCATTERS = 6;
+const REGULAR_BONUS_BOMB_RATIO = 0.2;
+const REGULAR_PROMOTION_CHANCE = 0.35;
+const REGULAR_CLUSTER_HOTSPOTS = 10;
+const REGULAR_CLUSTER_WIDTH = 7;
+const SUPER_BONUS_BOMB_RATIO = 0.03;
+const SUPER_BONUS_PROMOTION_CHANCE = 0.15;
+const SUPER_CLUSTER_HOTSPOTS = 3;
+const SUPER_CLUSTER_WIDTH = 2;
 const SUPER_SCATTER_REEL = 2;
 const RNG_SEEDS = [101, 203, 307, 401, 503, 607];
 
 const BASE_SYMBOL_WEIGHTS: Record<(typeof PAY_SYMBOL_IDS)[number], number> = {
-  H1: 6,
-  H2: 5,
-  H3: 4,
-  H4: 4,
+  H1: 12,
+  H2: 10,
+  H3: 9,
+  H4: 8,
   L1: 7,
-  L2: 7,
-  L3: 6,
-  L4: 5,
-  L5: 4,
+  L2: 6,
+  L3: 5,
+  L4: 4,
+  L5: 3,
 };
 
 const PREMIUM_SYMBOLS = ['H1', 'H2', 'H3', 'H4'] as const;
