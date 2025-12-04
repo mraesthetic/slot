@@ -29,6 +29,13 @@ interface BoardCell {
   symbol: GameSymbol;
 }
 
+interface RawSymbolPayload {
+  name: string;
+  scatter?: boolean;
+  bomb?: boolean;
+  multiplier?: number;
+}
+
 interface ClusterWin {
   symbolId: string;
   payout: number;
@@ -54,6 +61,7 @@ interface SpinOutcome {
 const PAY_SYMBOL_SET = new Set<string>(PAY_SYMBOL_IDS);
 const BASE_REEL_INDICES = [...Array(REELS).keys()];
 const ZERO_POSITIONS: BoardCell[] = [];
+const EMPTY_PADDING = Array(REELS).fill(0);
 
 export const onHandleGameFlow: GameHooks['onHandleGameFlow'] = (ctx) => {
   resetUserData(ctx);
@@ -191,7 +199,7 @@ function playSpin(
     const scatterPayout = getScatterPayout(scatterInfo.scatterCount);
     if (scatterPayout > 0) {
       ctx.services.wallet.addSpinWin(scatterPayout);
-      recordScatterWin(ctx, scatterInfo, scatterPayout);
+      recordScatterWinInfo(ctx, scatterInfo, scatterPayout);
       totalTumbleWin += scatterPayout;
     }
   }
@@ -225,9 +233,9 @@ function playSpin(
       }
     }
 
-    totalTumbleWin += appliedWin;
-    ctx.services.wallet.addTumbleWin(appliedWin);
-    recordTumbleWin(ctx, appliedWin, totalTumbleWin, tumbleIndex);
+    ctx.services.wallet.addTumbleWin(tumbleWin);
+    totalTumbleWin += tumbleWin;
+    recordTumbleWin(ctx, totalTumbleWin);
 
     const clearedPositions = clusters.flatMap((cluster) => cluster.positions);
     const tumbleResult = ctx.services.board.tumbleBoard(
@@ -235,13 +243,21 @@ function playSpin(
     );
     recordTumbleBoard(ctx, clearedPositions, tumbleResult);
 
+    if (opts.spinType === SPIN_TYPE.FREE_SPINS && bombSum > 0) {
+      const bonusWin = tumbleWin * (bombSum - 1);
+      ctx.services.wallet.addTumbleWin(bonusWin);
+      totalTumbleWin += bonusWin;
+      recordBombMultiplier(ctx, clusters, tumbleWin, bombSum, totalTumbleWin);
+      recordTumbleWin(ctx, totalTumbleWin);
+    }
+
     if (opts.spinType === SPIN_TYPE.FREE_SPINS) {
       assignBombMultipliers(ctx, opts.bonusType ?? ctx.state.userData.activeBonus ?? 'regular');
     }
   }
 
   ctx.services.wallet.confirmSpinWin();
-  recordSetTotalWin(ctx, totalTumbleWin, opts.spinType);
+  recordSetTotalWin(ctx, totalTumbleWin);
 
   if (ctx.services.wallet.getCurrentWin() >= MAX_WIN_MULTIPLIER) {
     ctx.state.triggeredMaxWin = true;
@@ -449,37 +465,34 @@ function recordReveal(ctx: CandyContext, spinType: SpinType) {
     type: 'reveal',
     data: {
       gameType: spinType === SPIN_TYPE.BASE_GAME ? 'basegame' : 'freegame',
-      board: serializeBoard(ctx.services.board.getBoardReels()),
-      paddingTop: serializeBoard(ctx.services.board.getPaddingTop()),
-      paddingBottom: serializeBoard(ctx.services.board.getPaddingBottom()),
+      board: serializeFullBoard(ctx),
+      paddingPositions: [...EMPTY_PADDING],
+      anticipation: [...EMPTY_PADDING],
     },
   });
 }
 
 function recordClusterWin(ctx: CandyContext, clusters: ClusterWin[], tumbleIndex: number, spinType: SpinType) {
+  const total = clusters.reduce((sum, cluster) => sum + cluster.payout, 0);
   ctx.services.data.addBookEvent({
     type: 'winInfo',
     data: {
-      tumble: tumbleIndex,
-      spinType,
-      clusters: clusters.map((cluster) => ({
+      totalWin: total,
+      wins: clusters.map((cluster) => ({
         symbol: cluster.symbolId,
-        payout: cluster.payout,
-        matched: cluster.matched,
+        win: cluster.payout,
         positions: serializePositions(cluster.positions),
-        bombPositions: serializePositions(cluster.bombPositions),
+        meta: buildClusterMeta(cluster),
       })),
     },
   });
 }
 
-function recordTumbleWin(ctx: CandyContext, amount: number, total: number, tumbleIndex: number) {
+function recordTumbleWin(ctx: CandyContext, total: number) {
   ctx.services.data.addBookEvent({
     type: 'updateTumbleWin',
     data: {
-      tumble: tumbleIndex,
-      amount,
-      total,
+      amount: total,
     },
   });
 }
@@ -518,39 +531,63 @@ function recordTumbleBoard(
   cleared: BoardCell[],
   tumbleResult: { newBoardSymbols: Record<string, GameSymbol[]>; newPaddingTopSymbols: Record<string, GameSymbol[]> },
 ) {
+  const newSymbols: RawSymbolPayload[][] = [];
+  for (let reel = 0; reel < REELS; reel++) {
+    const entries = tumbleResult.newBoardSymbols?.[String(reel)] ?? [];
+    newSymbols.push(entries.map(toRawSymbol));
+  }
+
   ctx.services.data.addBookEvent({
     type: 'tumbleBoard',
     data: {
-      cleared: serializePositions(cleared),
-      newSymbols: Object.entries(tumbleResult.newBoardSymbols ?? {}).map(([reel, symbols]) => ({
-        reel: Number(reel),
-        symbols: symbols.map((sym) => sym.id),
-      })),
-      newTopPadding: Object.entries(tumbleResult.newPaddingTopSymbols ?? {}).map(([reel, symbols]) => ({
-        reel: Number(reel),
-        symbols: symbols.map((sym) => sym.id),
-      })),
+      explodingSymbols: serializePositions(cleared),
+      newSymbols,
     },
   });
 }
 
-function recordScatterWin(ctx: CandyContext, scatterInfo: ScatterInfo, payout: number) {
+function recordScatterWinInfo(ctx: CandyContext, scatterInfo: ScatterInfo, payout: number) {
+  const positions = [...scatterInfo.scatterPositions, ...scatterInfo.superScatterPositions];
   ctx.services.data.addBookEvent({
-    type: 'scatterWin',
+    type: 'winInfo',
     data: {
-      payout,
-      positions: serializePositions([...scatterInfo.scatterPositions, ...scatterInfo.superScatterPositions]),
+      totalWin: payout,
+      wins: [
+        {
+          symbol: scatterInfo.superScatterCount > 0 ? 'BS' : 'S',
+          win: payout,
+          positions: serializePositions(positions),
+          meta: {
+            clusterMult: 1,
+            winWithoutMult: payout,
+            overlay: serializeOverlay(positions[0]),
+          },
+        },
+      ],
     },
   });
 }
 
-function recordSetTotalWin(ctx: CandyContext, amount: number, spinType: SpinType) {
+function recordSetTotalWin(ctx: CandyContext, amount: number) {
+  if (amount <= 0) return;
   ctx.services.data.addBookEvent({
     type: 'setTotalWin',
     data: {
       amount,
-      spinType,
-      winLevel: getWinLevel(amount),
+    },
+  });
+  const level = getWinLevel(amount);
+  if (level >= 6) {
+    recordSetWin(ctx, amount, level);
+  }
+}
+
+function recordSetWin(ctx: CandyContext, amount: number, level: number) {
+  ctx.services.data.addBookEvent({
+    type: 'setWin',
+    data: {
+      amount,
+      winLevel: level,
     },
   });
 }
@@ -559,9 +596,8 @@ function recordUpdateFreeSpin(ctx: CandyContext, spinIndex: number) {
   ctx.services.data.addBookEvent({
     type: 'updateFreeSpin',
     data: {
-      spin: spinIndex,
-      remaining: ctx.state.currentFreespinAmount,
-      totalAwarded: ctx.state.userData.totalBonusSpinsAwarded,
+      amount: spinIndex,
+      total: ctx.state.userData.totalBonusSpinsAwarded,
     },
   });
 }
@@ -570,7 +606,6 @@ function recordRetrigger(ctx: CandyContext, added: number) {
   ctx.services.data.addBookEvent({
     type: 'freeSpinRetrigger',
     data: {
-      added,
       totalFs: ctx.state.currentFreespinAmount,
     },
   });
@@ -587,8 +622,6 @@ function recordFreeSpinTrigger(
     data: {
       totalFs: ctx.state.userData.totalBonusSpinsAwarded,
       positions: serializePositions([...scatterInfo.scatterPositions, ...scatterInfo.superScatterPositions]),
-      forced: Boolean(options?.forced),
-      skipPayout: Boolean(options?.skipPayout),
     },
   });
 
@@ -640,16 +673,50 @@ function getWinLevel(amount: number) {
   return 0;
 }
 
-function serializeBoard(board: GameSymbol[][]) {
-  return board.map((reel) => reel.map((symbol) => symbol?.id ?? ''));
+function serializeFullBoard(ctx: CandyContext) {
+  const board = ctx.services.board.getBoardReels();
+  const paddingTop = ctx.services.board.getPaddingTop();
+  const paddingBottom = ctx.services.board.getPaddingBottom();
+
+  return board.map((reel, index) => {
+    const top = paddingTop[index]?.map(toRawSymbol) ?? [];
+    const bottom = paddingBottom[index]?.map(toRawSymbol) ?? [];
+    return [...top, ...reel.map(toRawSymbol), ...bottom];
+  });
 }
 
 function serializePositions(positions: BoardCell[] = ZERO_POSITIONS) {
   return positions.map((pos) => ({
     reel: pos.reel,
     row: pos.row,
-    symbol: pos.symbol.id,
   }));
+}
+
+function toRawSymbol(symbol?: GameSymbol | null): RawSymbolPayload {
+  if (!symbol) return { name: '' };
+  const raw: RawSymbolPayload = { name: symbol.id };
+  if (symbol.id === 'M') {
+    raw.bomb = true;
+    raw.multiplier = symbol.properties.get('multiplier') ?? 0;
+  }
+  if (symbol.id === 'S' || symbol.id === 'BS') {
+    raw.scatter = true;
+  }
+  return raw;
+}
+
+function buildClusterMeta(cluster: ClusterWin) {
+  const overlay = serializeOverlay(cluster.positions[0]);
+  return {
+    clusterMult: 1,
+    winWithoutMult: cluster.payout,
+    overlay,
+  };
+}
+
+function serializeOverlay(cell?: BoardCell) {
+  if (!cell) return { reel: 0, row: 0 };
+  return { reel: cell.reel, row: cell.row };
 }
 
 function forceScatterLayout(ctx: CandyContext, bonusType: BonusType) {
